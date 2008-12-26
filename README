@@ -1,0 +1,113 @@
+= tbDuplicateKeyPlugin =
+
+== About ==
+
+This code allows you to easily extend admin generated modules to handle 
+duplicate key errors gracefully, reporting them via the usual error handling
+mechanisms instead of an exception message. This implementation
+detects the native MySQL duplicate key error. This is a Good Thing
+because if we implemented this as a Symfony validator there would
+still be a race condition when two users insert an object by
+the same name (or other unique field) at the same time.
+
+== Requirements ==
+
+This code is Propel- and MySQL-specific. It wouldn't be
+MySQL-specific if Propel had portable detection of
+duplicate keys and it's really unfortunate that it doesn't. However
+this plugin also takes advantage of a MySQL-specific command to figure out 
+which column caused the duplicate key error.
+
+== Usage ==
+
+To use this plugin you must extend two methods in your admin-generated
+action class: `validateEdit()` and `saveObject($object)` (substitute the
+name of the class you're adminning for `Object`). 
+
+Here's an example implementation of `validateEdit()` for
+a class called 'Venue':
+
+    public function validateEdit()
+    {
+      // We must pass the name of the model class we're editing
+      // (NOT necessarily the same as the name of the admin module).
+      if (!tbDuplicateKeyTools::validate('Venue'))
+      {
+        return false;
+      }
+      // Any other extra validation you want to do etc
+      return true;
+    }
+
+You must also extend `saveObject()` (replace Object with the model class
+you're adminning). Here is a sample implementation for a model class
+called Venue. Note the need
+to catch exceptions and pass them to `tbDuplicateKeyTools::examine()`,
+along with the name of your admin module (often, but NOT always, the
+same as the name of the model class but in LOWER CASE):
+
+    protected function saveVenue($venue)
+    {
+      try
+      {
+        parent::saveVenue($venue);
+      } catch Exception ($e)
+      {
+        // OUR admin module for the venue class is called venue. 
+        // But YOURS is called whatever you named it.
+        tbDuplicateKeyTools::examine('venue', $e);
+      }
+    }
+
+If the `examine` method recognizes a duplicate key exception, it will
+stop execution by calling the `forward` method to retry the edit action,
+after first setting a flash attribute that ensurs that your validator
+picks up on the fact that a duplicate key error exists.
+
+That's it- you're good to go! With these two changes in place,
+any duplicate key errors caused by user input will automagically
+result in an understandable error message pointing to the
+offending field.
+
+Note that if you have keys made up of multiple fields only the first
+field will be flagged. This is a limitation of MySQL's error reporting.
+
+== Warnings ==
+
+1. Some future version of MySQL or Propel may report duplicate key errors
+in a radically different manner... though there is probably a lot of code
+out there by now detecting them this way. Just don't be shocked 
+and amazed if Propel 2.0 or MySQL 7.0 breaks this code.
+
+2. Yes, the `examine` method will re-throw exceptions it doesn't
+recognize. This means that you can catch exceptions thrown by it if you wish. 
+But it will also throw an `sfStopException` when it successfully
+detects a duplicate key error. So take care not to interfere with
+exceptions of the sfStopException class.
+
+3. tbDuplicateKeyPlugin outputs its error message by setting a flash
+attribute as a message to the next request, then invoking the
+sfRequest::forward method. Since forward() is implemented internally
+and does not result in a genuinely new browser request, my expectation
+is that flash attributes will work in this case even if the user is not 
+accepting session cookies. So this implementation should be valid even
+with cookies turned off. But I have not rigorously tested that.
+Your input would be appreciated.
+
+4. The changes in the Symfony 1.1 and 1.2 admin generators don't
+look drastic enough to break this code, so I've enabled it for those
+versions as well. But I haven't tried it with those releases yet myself.
+Your input would be appreciated.
+
+== Credits ==
+
+tom@punkave.com
+www.punkave.com
+www.boutell.com
+
+== Changelog ==
+
+0.5.1: markdown fixes, other documentation fixes. No code changes.
+
+0.5.0: initial release.
+
